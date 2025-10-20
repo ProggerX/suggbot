@@ -14,7 +14,8 @@ import Telegram.Bot.Simple
 newtype Post = Post FileId
 
 data Action
-  = SendToAdmins Post
+  = SendToAdmins Post Message
+  | SendWelcome Message
   | PostToChannel Post Message Message
   | Delete Message Message
 
@@ -46,14 +47,17 @@ updateToAction upd Model{adminChatId} =
         (Just ps, _) ->
           if null ps
             then Nothing
-            else Just $ SendToAdmins $ Post $ photoSizeFileId $ last ps
+            else Just $ SendToAdmins (Post $ photoSizeFileId $ last ps) msg
         (_, Just t) ->
           if cid == adminChatId
             then case t of
               "+" -> PostToChannel . Post <$> rpFID' <*> rpl' <*> pure msg
               "-" -> Delete <$> rpl' <*> pure msg
               _ -> Nothing
-            else Nothing
+            else
+              if t == "/start"
+                then Just $ SendWelcome msg
+                else Nothing
      where
       ps' = messagePhoto msg
       t' = messageText msg
@@ -74,20 +78,31 @@ delete msg1 msg2 = do
   void $ runTG (deleteMessage cid1 mid1)
   void $ runTG (deleteMessage cid2 mid2)
 handleAction :: Action -> Model -> Eff Action Model
-handleAction a m@Model{..} = case a of
-  SendToAdmins (Post fID) ->
-    m <# do
-      let sid = SomeChatId adminChatId
-          req = defSendPhoto sid (PhotoFileId fID)
-      void $ runTG req
-  PostToChannel (Post fID) msg1 msg2 ->
-    m <# do
-      -- let sid = SomeChatId channelChatId
-      --     req = defSendPhoto sid (PhotoFileId fID)
-      -- void $ runTG req
-      -- delete msg1 msg2
-      pure ()
-  Delete msg1 msg2 -> m <# pure ()
+handleAction a m@Model{..} =
+  let sid = SomeChatId adminChatId
+   in case a of
+        SendToAdmins (Post fID) msg ->
+          let mid = SomeChatId $ chatId $ messageChat $ msg
+           in m <# do
+                void $ runTG $ defSendMessage mid "Спасибо, фан-арт принят!"
+                void $ runTG $ defSendPhoto sid (PhotoFileId fID)
+        PostToChannel (Post fID) msg1 msg2 ->
+          m <# do
+            -- let sid = SomeChatId channelChatId
+            --     req = defSendPhoto sid (PhotoFileId fID)
+            -- void $ runTG req
+            -- delete msg1 msg2
+            pure ()
+        Delete msg1 msg2 -> m <# pure ()
+        SendWelcome msg ->
+          let mid = SomeChatId $ chatId $ messageChat $ msg
+           in m <# do
+                void $
+                  runTG
+                    ( defSendMessage
+                        mid
+                        "Привет, это предложка, присылай сюда свой фан-арт"
+                    )
 
 run :: Token -> IO ()
 run t = do
